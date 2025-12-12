@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import http from 'http';
-import { getLocationFromIP } from '@/lib/geocoding';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -59,42 +58,86 @@ export async function GET() {
       throw new Error(`RPC Error: ${result.error.message}`);
     }
 
-    // Transform and geocode nodes
+    // Transform nodes first (fast)
     const pods = result.result?.pods || [];
-    const nodes = await Promise.all(
-      pods.map(async (pod: any) => {
-        const ip = pod.address?.split(':')[0] || 'unknown';
-        const location = ip !== 'unknown' ? await getLocationFromIP(ip) : null;
+    
+    // Extract all IPs
+    const allIps = pods
+      .map((pod: any) => pod.address?.split(':')[0])
+      .filter((ip: string) => ip && ip !== 'unknown');
+    
+    // Import geocoding module with cache
+    const { getLocationFromIP, cache } = await import('@/lib/geocoding');
+    
+    // Check cache for all IPs
+    const locations = new Map();
+    const uncachedIps = [];
+    
+    for (const ip of allIps) {
+      const cached = cache.get(ip);
+      if (cached) {
+        locations.set(ip, cached);
+      } else {
+        uncachedIps.push(ip);
+      }
+    }
+    
+    // Geocode up to 15 uncached IPs per request (faster incremental geocoding)
+    // At 45 req/min limit, 15 IPs = ~20 seconds per request
+    let newlyGeocoded = 0;
+    const maxNewGeocode = Math.min(15, uncachedIps.length);
+    
+    for (let i = 0; i < maxNewGeocode; i++) {
+      const ip = uncachedIps[i];
+      try {
+        const location = await getLocationFromIP(ip);
+        if (location) {
+          locations.set(ip, location);
+          newlyGeocoded++;
+        }
+        
+        // Small delay between requests to avoid rate limit (1.3s = ~45 req/min)
+        if (i < maxNewGeocode - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1300));
+        }
+      } catch (error) {
+        console.error(`Failed to geocode ${ip}:`, error);
+      }
+    }
 
-        return {
-          address: pod.address || 'unknown',
-          pubkey: pod.pubkey,
-          version: pod.version || 'unknown',
-          lastSeen: pod.last_seen_timestamp,
-          isPublic: pod.is_public,
-          rpcPort: pod.rpc_port,
-          storageCommitted: pod.storage_committed,
-          storageUsed: pod.storage_used,
-          storageUsagePercent: pod.storage_usage_percent,
-          uptime: pod.uptime,
-          // Geocoding data
-          lat: location?.lat,
-          lng: location?.lng,
-          city: location?.city,
-          country: location?.country,
-          countryCode: location?.countryCode,
-        };
-      })
-    );
+    console.log(`📊 Geocoding status: ${locations.size} total (${locations.size - newlyGeocoded} cached, ${newlyGeocoded} new)`);
 
-    console.log(`✅ Geocoded ${nodes.filter(n => n.lat).length}/${nodes.length} nodes`);
+    // Transform ALL nodes with available geocoding data
+    const nodes = pods.map((pod: any) => {
+      const ip = pod.address?.split(':')[0] || 'unknown';
+      const location = ip !== 'unknown' ? locations.get(ip) : null;
+
+      return {
+        address: pod.address || 'unknown',
+        pubkey: pod.pubkey,
+        version: pod.version || 'unknown',
+        lastSeen: pod.last_seen_timestamp,
+        isPublic: pod.is_public,
+        rpcPort: pod.rpc_port,
+        storageCommitted: pod.storage_committed,
+        storageUsed: pod.storage_used,
+        storageUsagePercent: pod.storage_usage_percent,
+        uptime: pod.uptime,
+        // Geocoding data
+        lat: location?.lat,
+        lng: location?.lng,
+        city: location?.city,
+        country: location?.country,
+        countryCode: location?.countryCode,
+      };
+    });
 
     return NextResponse.json({
       nodes,
       totalCount: result.result?.total_count || nodes.length,
       apiVersion,
       timestamp: Date.now(),
-      geocoded: nodes.filter(n => n.lat).length
+      geocoded: nodes.filter((n: any) => n.lat).length
     });
   } catch (error) {
     console.error('❌ Geo API Error:', error);

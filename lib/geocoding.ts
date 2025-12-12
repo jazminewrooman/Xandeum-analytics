@@ -10,7 +10,8 @@ export interface GeoLocation {
   countryCode?: string;
 }
 
-const cache = new Map<string, GeoLocation>();
+// Export cache for external access
+export const cache = new Map<string, GeoLocation>();
 
 /**
  * Get geolocation from IP address using ip-api.com
@@ -31,8 +32,27 @@ export async function getLocationFromIP(ip: string): Promise<GeoLocation | null>
       return null;
     }
 
-    const response = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,lat,lon,city,country,countryCode`);
-    const data = await response.json();
+    const response = await fetch(
+      `http://ip-api.com/json/${cleanIp}?fields=status,lat,lon,city,country,countryCode,isp,org,as`,
+      { 
+        signal: AbortSignal.timeout(5000) // 5 second timeout
+      }
+    );
+
+    // Check if response is ok before parsing
+    if (!response.ok) {
+      console.warn(`⚠️ ip-api returned ${response.status} for ${cleanIp}`);
+      return null;
+    }
+
+    // Check if response has content
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+      console.warn(`⚠️ Empty response from ip-api for ${cleanIp}`);
+      return null;
+    }
+
+    const data = JSON.parse(text);
 
     if (data.status === 'success') {
       const location: GeoLocation = {
@@ -43,50 +63,77 @@ export async function getLocationFromIP(ip: string): Promise<GeoLocation | null>
         countryCode: data.countryCode
       };
       
+      // Log para debug (puedes ver en consola del servidor)
+      console.log(`📍 ${cleanIp} → ${data.city}, ${data.country} (${data.isp || data.org || 'Unknown ISP'})`);
+      
       cache.set(ip, location);
       return location;
+    } else if (data.status === 'fail') {
+      console.warn(`⚠️ ip-api failed for ${cleanIp}: ${data.message || 'Rate limit or invalid IP'}`);
+      return null;
     }
     
     return null;
   } catch (error) {
-    console.error(`Failed to geocode IP ${ip}:`, error);
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        console.warn(`⏱️ Timeout geocoding ${ip}`);
+      } else {
+        console.error(`❌ Failed to geocode IP ${ip}:`, error.message);
+      }
+    }
     return null;
   }
 }
 
 /**
  * Batch geocode multiple IPs with rate limiting
+ * Rate limit: 45 requests/minute for free tier
  */
 export async function batchGeocode(ips: string[]): Promise<Map<string, GeoLocation>> {
   const results = new Map<string, GeoLocation>();
   
-  // Process in batches of 40 to stay under rate limit (45/min)
-  const batchSize = 40;
-  const delay = 60000 / 45; // ~1.3 seconds per request
+  // Filter out IPs that are already cached
+  const uncachedIps = ips.filter(ip => !cache.has(ip));
   
-  for (let i = 0; i < ips.length; i++) {
-    const ip = ips[i];
-    
-    // Check cache first
-    if (cache.has(ip)) {
-      const cached = cache.get(ip)!;
+  // Return cached results immediately
+  ips.forEach(ip => {
+    const cached = cache.get(ip);
+    if (cached) {
       results.set(ip, cached);
-      continue;
+    }
+  });
+  
+  if (uncachedIps.length === 0) {
+    console.log('✅ All IPs already geocoded (cached)');
+    return results;
+  }
+  
+  console.log(`🌍 Geocoding ${uncachedIps.length} new IPs (${ips.length - uncachedIps.length} cached)`);
+  
+  // Process sequentially with delays to respect rate limits
+  // 45 requests/min = 1 request per ~1.3 seconds to be safe
+  const delayMs = 1400; // 1.4 seconds between requests
+  
+  for (let i = 0; i < uncachedIps.length; i++) {
+    const ip = uncachedIps[i];
+    
+    try {
+      const location = await getLocationFromIP(ip);
+      if (location) {
+        results.set(ip, location);
+      }
+    } catch (error) {
+      console.error(`Error geocoding ${ip}:`, error);
     }
     
-    // Geocode with delay
-    const location = await getLocationFromIP(ip);
-    if (location) {
-      results.set(ip, location);
-    }
-    
-    // Add delay every batch
-    if ((i + 1) % batchSize === 0 && i < ips.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    } else if (i < ips.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, delay));
+    // Delay between requests (except for last one)
+    if (i < uncachedIps.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
+  
+  console.log(`✅ Geocoded ${results.size}/${ips.length} IPs successfully`);
   
   return results;
 }

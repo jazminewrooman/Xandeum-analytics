@@ -52,7 +52,19 @@ export function WorldMap({ nodes }: WorldMapProps) {
     );
   }
 
-  const geoNodes = nodes.filter(n => n.lat && n.lng);
+  // Validar y filtrar nodos con coordenadas válidas
+  const validNodes = Array.isArray(nodes) ? nodes : [];
+  const geoNodes = validNodes.filter(n => {
+    return n && 
+           typeof n.lat === 'number' && 
+           typeof n.lng === 'number' &&
+           !isNaN(n.lat) && 
+           !isNaN(n.lng) &&
+           n.lat >= -90 && 
+           n.lat <= 90 &&
+           n.lng >= -180 && 
+           n.lng <= 180;
+  });
 
   // Create custom colored markers using DivIcon
   const createIcon = (status: 'online' | 'warning' | 'offline') => {
@@ -92,15 +104,16 @@ export function WorldMap({ nodes }: WorldMapProps) {
         <MapUpdater nodes={geoNodes} />
 
         {geoNodes.map((node, idx) => {
-          const status = getNodeStatus(node.lastSeen);
-          const icon = createIcon(status);
+          try {
+            const status = getNodeStatus(node.lastSeen);
+            const icon = createIcon(status);
 
-          return (
-            <Marker
-              key={node.pubkey || idx}
-              position={[node.lat!, node.lng!]}
-              icon={icon}
-            >
+            return (
+              <Marker
+                key={`marker-${idx}-${node.pubkey || node.address}`}
+                position={[node.lat!, node.lng!]}
+                icon={icon}
+              >
               <Popup>
                 <div className="p-2 min-w-[200px]">
                   <div className="flex items-center gap-2 mb-2">
@@ -116,13 +129,16 @@ export function WorldMap({ nodes }: WorldMapProps) {
                   
                   <div className="space-y-1 text-xs">
                     <p>
-                      <span className="font-medium">Address:</span>{' '}
+                      <span className="font-medium">IP:</span>{' '}
                       <span className="font-mono text-[10px]">
-                        {node.address.substring(0, 20)}...
+                        {node.address.split(':')[0]}
                       </span>
                     </p>
                     <p>
                       <span className="font-medium">Version:</span> {node.version}
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      Coords: {node.lat?.toFixed(4)}, {node.lng?.toFixed(4)}
                     </p>
                     {node.storageUsed && (
                       <p>
@@ -139,7 +155,11 @@ export function WorldMap({ nodes }: WorldMapProps) {
               </Popup>
             </Marker>
           );
-        })}
+          } catch (error) {
+            console.error('Error rendering marker:', error);
+            return null;
+          }
+        }).filter(Boolean)}
       </MapContainer>
     </div>
   );

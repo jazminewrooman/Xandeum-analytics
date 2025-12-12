@@ -1,28 +1,46 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { PNode } from '@/lib/types/pnode';
-import { StatsCard } from '@/components/stats-card';
 import { NodeTable } from '@/components/node-table';
-import { Server, HardDrive, Activity, Zap, Loader2, MapPin } from 'lucide-react';
-import { formatBytes } from '@/lib/utils';
-import Link from 'next/link';
+import { MapStatsOverlay } from '@/components/map-stats-overlay';
+import { CountryStatsSidebar } from '@/components/country-stats-sidebar';
+import { NetworkChart } from '@/components/network-chart';
+import { useNetworkSnapshots } from '@/hooks/useNetworkSnapshots';
+import { Server, Loader2, Map as MapIcon, List, Menu, Download } from 'lucide-react';
+
+const WorldMap = dynamic(
+  () => import('@/components/world-map').then(mod => ({ default: mod.WorldMap })),
+  { 
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-8 h-8 text-[var(--primary)] animate-spin" />
+      </div>
+    )
+  }
+);
+
+type ViewMode = 'map' | 'list';
 
 export default function Home() {
   const [nodes, setNodes] = useState<PNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [viewMode, setViewMode] = useState<ViewMode>('map');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  // Network snapshots for historical data
+  const { snapshots, stats } = useNetworkSnapshots(nodes);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      console.log('📡 Fetching from API proxy...');
-
-      // Llamar a nuestro API route en lugar del RPC directamente
-      const response = await fetch('/api/nodes');
+      const response = await fetch('/api/nodes-geo');
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -31,7 +49,6 @@ export default function Home() {
 
       const data = await response.json();
 
-      // Transform timestamps
       const fetchedNodes = data.nodes.map((node: any) => ({
         ...node,
         lastSeen: new Date(node.lastSeen * 1000)
@@ -39,8 +56,6 @@ export default function Home() {
 
       setNodes(fetchedNodes);
       setLastUpdate(new Date());
-      
-      console.log('✅ Loaded', fetchedNodes.length, 'nodes');
     } catch (err) {
       console.error('Fetch error:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -51,20 +66,21 @@ export default function Home() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60000); // Refresh every 60s
+    // Auto-refresh every 30 seconds to progressively geocode all nodes
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, []);
 
   if (loading && nodes.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--surface)]">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-white to-pink-50">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-[var(--primary)] animate-spin mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
-            Loading pNode Data...
+            Loading Xandeum Network...
           </h1>
           <p className="text-[var(--text-secondary)]">
-            Connecting to Xandeum Network
+            Gathering pNode data
           </p>
         </div>
       </div>
@@ -73,17 +89,15 @@ export default function Home() {
 
   if (error && nodes.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--surface)]">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-white to-pink-50">
         <div className="text-center">
-          <div className="w-16 h-16 bg-[var(--rose)] rounded-full flex items-center justify-center mx-auto mb-4">
-            <Server className="w-8 h-8 text-[var(--danger)]" />
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Server className="w-8 h-8 text-red-600" />
           </div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
-            Failed to load pNode data
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            Failed to load data
           </h1>
-          <p className="text-[var(--text-secondary)] mb-4">
-            {error}
-          </p>
+          <p className="text-gray-600 mb-4">{error}</p>
           <button
             onClick={fetchData}
             className="px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-dark)] transition-colors"
@@ -95,138 +109,124 @@ export default function Home() {
     );
   }
 
-  // Calculate statistics
-  const totalCount = nodes.length;
-  const apiVersion = process.env.NEXT_PUBLIC_API_VERSION || '0.6';
-  const supportsDetailedStats = apiVersion === '0.7';
-  
-  const activeNodes = nodes.filter(node => {
-    const minutesAgo = (new Date().getTime() - node.lastSeen.getTime()) / 1000 / 60;
-    return minutesAgo < 5;
-  }).length;
-
-  // Version distribution
-  const versionCounts = nodes.reduce((acc, node) => {
-    const version = node.version.includes('0.7') ? '0.7.x' : 
-                   node.version.includes('0.6') ? '0.6.x' : 
-                   node.version.includes('0.5') ? '0.5.x' : 'other';
-    acc[version] = (acc[version] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const latestVersion = '0.7.x';
-  const latestVersionCount = versionCounts[latestVersion] || 0;
-  const latestVersionPercent = totalCount > 0 ? (latestVersionCount / totalCount * 100).toFixed(0) : 0;
-
-  // Total storage (only for v0.7 nodes with stats)
-  const totalStorage = nodes.reduce((sum, node) => {
-    return sum + (node.storageUsed || 0);
-  }, 0);
-
-  // Average uptime (only for v0.7 nodes with stats)
-  const nodesWithUptime = nodes.filter(node => node.uptime && node.uptime > 0);
-  const avgUptime = nodesWithUptime.length > 0
-    ? nodesWithUptime.reduce((sum, node) => sum + (node.uptime || 0), 0) / nodesWithUptime.length
-    : 0;
-  const avgUptimeDays = (avgUptime / 86400).toFixed(1);
-
-  const uptimePercent = totalCount > 0 ? (activeNodes / totalCount * 100).toFixed(0) : 0;
-
   return (
-    <div className="min-h-screen bg-[var(--surface)]">
-      {/* Header */}
-      <header className="bg-white border-b border-[var(--border)] sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-purple-50 via-white to-pink-50">
+      <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 shadow-sm z-20">
+        <div className="max-w-full mx-auto px-3 md:px-6 py-3 md:py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] rounded-lg flex items-center justify-center">
-                <Server className="w-6 h-6 text-white" />
+            <div className="flex items-center gap-2 md:gap-3">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="md:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] rounded-lg flex items-center justify-center shadow-lg">
+                <Server className="w-4 h-4 md:w-6 md:h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-[var(--text-primary)]">
-                  Xandeum Network Analytics
+                <h1 className="text-base md:text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                  Xandeum Network
                 </h1>
-                <p className="text-sm text-[var(--text-secondary)]">
-                  Real-time pNode monitoring • API v{apiVersion}
+                <p className="text-xs text-gray-500 hidden md:block">
+                  Real-time pNode Analytics
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <Link
-                href="/map"
-                className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary-dark)] transition-colors text-sm font-medium"
+
+            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
+              <button
+                onClick={() => setViewMode('map')}
+                className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'map' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
               >
-                <MapPin className="w-4 h-4" />
-                View Map
-              </Link>
-              <div className="text-right">
-                <p className="text-xs text-[var(--text-muted)]">
-                  Last updated
-                </p>
-                <p className="text-sm font-medium text-[var(--text-secondary)]">
-                  {lastUpdate.toLocaleTimeString()}
-                </p>
-              </div>
+                <MapIcon className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                <span className="hidden sm:inline">Map</span>
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'list' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                <List className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                <span className="hidden sm:inline">List</span>
+              </button>
             </div>
+
+            <div className="text-right hidden md:block">
+              <p className="text-xs text-gray-500">
+                {nodes.filter(n => n.lat).length}/{nodes.length} geocoded
+              </p>
+              <p className="text-sm font-medium text-gray-900">
+                {lastUpdate.toLocaleTimeString()}
+              </p>
+            </div>
+            
+            <button 
+              onClick={fetchData}
+              disabled={loading}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+              title="Refresh data"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatsCard
-            title="Total pNodes"
-            value={totalCount}
-            subtitle={`${activeNodes} currently active`}
-            icon={Server}
-            index={0}
+      <div className="flex-1 flex overflow-hidden">
+        {viewMode === 'map' && (
+          <CountryStatsSidebar 
+            nodes={nodes} 
+            isOpen={sidebarOpen} 
+            onClose={() => setSidebarOpen(false)}
           />
-          <StatsCard
-            title="Latest Version"
-            value={`${latestVersionPercent}%`}
-            subtitle={`${latestVersionCount} nodes on ${latestVersion}`}
-            icon={Zap}
-            index={1}
-          />
-          <StatsCard
-            title="Total Storage"
-            value={formatBytes(totalStorage)}
-            subtitle={supportsDetailedStats ? `Across ${nodesWithUptime.length} nodes` : 'Upgrade to v0.7 for stats'}
-            icon={HardDrive}
-            index={2}
-          />
-          <StatsCard
-            title="Network Health"
-            value={`${uptimePercent}%`}
-            subtitle={avgUptimeDays !== '0.0' ? `Avg uptime: ${avgUptimeDays} days` : 'Nodes online'}
-            icon={Activity}
-            index={3}
-          />
-        </div>
-
-        {/* Info Banner */}
-        {!supportsDetailedStats && (
-          <div className="mb-8 p-4 bg-[var(--lavender)] border border-[var(--primary)] rounded-lg">
-            <p className="text-sm text-[var(--primary)]">
-              <strong>Note:</strong> You're using API v{apiVersion}. Upgrade to v0.7 to see detailed storage and uptime statistics for all nodes.
-            </p>
-          </div>
         )}
 
-        {/* Nodes Table */}
-        <NodeTable nodes={nodes} />
-      </main>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {viewMode === 'map' ? (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Chart Section - Scrollable */}
+              <div className="overflow-y-auto bg-gradient-to-br from-purple-50 via-white to-pink-50">
+                <div className="p-4 md:p-6 max-w-7xl mx-auto">
+                  <NetworkChart 
+                    snapshots={snapshots} 
+                    timeRangeHours={stats.timeRangeHours}
+                  />
+                </div>
+              </div>
 
-      {/* Footer */}
-      <footer className="mt-16 py-8 border-t border-[var(--border)] bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <p className="text-center text-sm text-[var(--text-secondary)]">
-            Built for Xandeum Network • Data refreshes every 60 seconds
-          </p>
+              {/* Map Section - Fixed */}
+              <div className="flex-1 relative min-h-[400px]">
+                <div className="absolute inset-0">
+                  <WorldMap nodes={nodes} />
+                </div>
+                
+                <div className="absolute bottom-4 left-4 right-4 z-10 pointer-events-none">
+                  <div className="pointer-events-auto">
+                    <MapStatsOverlay nodes={nodes} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
+              <div className="max-w-7xl mx-auto space-y-6">
+                {/* Chart in List View */}
+                <NetworkChart 
+                  snapshots={snapshots} 
+                  timeRangeHours={stats.timeRangeHours}
+                />
+                
+                {/* Node Table */}
+                <NodeTable nodes={nodes} />
+              </div>
+            </div>
+          )}
         </div>
-      </footer>
+      </div>
     </div>
   );
 }
