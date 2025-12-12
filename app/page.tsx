@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
 import { PNode } from '@/lib/types/pnode';
 import { NodeTable } from '@/components/node-table';
 import { MapStatsOverlay } from '@/components/map-stats-overlay';
@@ -75,6 +76,16 @@ export default function Home() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-white to-pink-50">
         <div className="text-center">
+          <div className="mb-6">
+            <Image 
+              src="/logo.png" 
+              alt="Xandeum Logo" 
+              width={80} 
+              height={80}
+              className="mx-auto mb-4"
+              priority
+            />
+          </div>
           <Loader2 className="w-12 h-12 text-[var(--primary)] animate-spin mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
             Loading Xandeum Network...
@@ -91,8 +102,14 @@ export default function Home() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-white to-pink-50">
         <div className="text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Server className="w-8 h-8 text-red-600" />
+          <div className="mb-6">
+            <Image 
+              src="/logo.png" 
+              alt="Xandeum Logo" 
+              width={80} 
+              height={80}
+              className="mx-auto mb-4 opacity-50"
+            />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">
             Failed to load data
@@ -121,8 +138,15 @@ export default function Home() {
               >
                 <Menu className="w-5 h-5" />
               </button>
-              <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] rounded-lg flex items-center justify-center shadow-lg">
-                <Server className="w-4 h-4 md:w-6 md:h-6 text-white" />
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center">
+                <Image 
+                  src="/logo.png" 
+                  alt="Xandeum Logo" 
+                  width={40} 
+                  height={40}
+                  className="w-8 h-8 md:w-10 md:h-10"
+                  priority
+                />
               </div>
               <div>
                 <h1 className="text-base md:text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
