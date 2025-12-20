@@ -101,7 +101,7 @@ export function NetworkChart({ snapshots, timeRangeHours }: NetworkChartProps) {
               borderRadius: '8px',
               fontSize: '12px'
             }}
-            formatter={(value: any, name: string) => {
+            formatter={(value: any, name: string | undefined) => {
               if (name === 'health') return [`${value}`, 'Health Score'];
               if (name === 'online') return [`${value} nodes`, 'Online'];
               if (name === 'geocoded') return [`${value} nodes`, 'Geocoded'];
