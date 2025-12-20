@@ -9,7 +9,7 @@ import { MapStatsOverlay } from '@/components/map-stats-overlay';
 import { CountryStatsSidebar } from '@/components/country-stats-sidebar';
 import { NetworkChart } from '@/components/network-chart';
 import { useNetworkSnapshots } from '@/hooks/useNetworkSnapshots';
-import { Server, Loader2, Map as MapIcon, List, Menu, Download } from 'lucide-react';
+import { Server, Loader2, Map as MapIcon, List, Menu, Download, Flame } from 'lucide-react';
 
 const WorldMap = dynamic(
   () => import('@/components/world-map').then(mod => ({ default: mod.WorldMap })),
@@ -23,7 +23,19 @@ const WorldMap = dynamic(
   }
 );
 
-type ViewMode = 'map' | 'list';
+const PerformanceHeatMap = dynamic(
+  () => import('@/components/performance-heatmap').then(mod => ({ default: mod.PerformanceHeatMap })),
+  { 
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-8 h-8 text-[var(--primary)] animate-spin" />
+      </div>
+    )
+  }
+);
+
+type ViewMode = 'map' | 'list' | 'heatmap';
 
 export default function Home() {
   const [nodes, setNodes] = useState<PNode[]>([]);
@@ -161,14 +173,21 @@ export default function Home() {
             <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg">
               <button
                 onClick={() => setViewMode('map')}
-                className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'map' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'map' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
               >
                 <MapIcon className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 <span className="hidden sm:inline">Map</span>
               </button>
               <button
+                onClick={() => setViewMode('heatmap')}
+                className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'heatmap' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                <Flame className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                <span className="hidden sm:inline">Heat</span>
+              </button>
+              <button
                 onClick={() => setViewMode('list')}
-                className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'list' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${viewMode === 'list' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
               >
                 <List className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 <span className="hidden sm:inline">List</span>
@@ -210,7 +229,7 @@ export default function Home() {
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          {viewMode === 'map' ? (
+          {viewMode === 'map' && (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Chart Section - Scrollable */}
               <div className="overflow-y-auto bg-gradient-to-br from-purple-50 via-white to-pink-50">
@@ -235,7 +254,15 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          ) : (
+          )}
+
+          {viewMode === 'heatmap' && (
+            <div className="flex-1 relative">
+              <PerformanceHeatMap nodes={nodes} />
+            </div>
+          )}
+
+          {viewMode === 'list' && (
             <div className="flex-1 overflow-y-auto p-4 md:p-6">
               <div className="max-w-7xl mx-auto space-y-6">
                 {/* Chart in List View */}
@@ -243,7 +270,7 @@ export default function Home() {
                   snapshots={snapshots} 
                   timeRangeHours={stats.timeRangeHours}
                 />
-                
+
                 {/* Node Table */}
                 <NodeTable nodes={nodes} />
               </div>
